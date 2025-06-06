@@ -7,7 +7,7 @@ def run_gtn():
     
     # 构造命令
     command = [
-        'python', 'train.py',
+        'python', 'my_gtn/train.py',
         '--dataset', 'DBLP',
         '--model', 'GTN',
         '--epochs', '200',
@@ -18,7 +18,7 @@ def run_gtn():
         '--num_layers', '1',
         '--seed', '42',
         '--save_metapath',
-        '--save_dir', 'metapath_data'
+        '--save_dir', 'my_gtn/metapath_data'
     ]
     
     # 运行命令

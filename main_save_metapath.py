@@ -50,6 +50,26 @@ def save_metapath_graph(A, Ws, num_nodes, save_dir):
     with open(os.path.join(save_dir, 'metapath_weights.pkl'), 'wb') as f:
         pickle.dump([[w.detach().cpu().numpy() for w in W_list] for W_list in Ws], f)
 
+def save_metapath_H(H_list, save_path):
+    """保存metapath H到文件"""
+    # 确保目录存在
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    # 将H转换为可保存的格式
+    save_H = []
+    for H in H_list:  # 遍历每个epoch的H
+        epoch_H = []
+        for h in H:  # 遍历每个channel的H
+            # 将edge_index和edge_value转换为CPU并转为numpy
+            edge_index = h[0].detach().cpu().numpy()
+            edge_value = h[1].detach().cpu().numpy()
+            epoch_H.append((edge_index, edge_value))
+        save_H.append(epoch_H)
+    
+    # 保存到文件
+    with open(save_path, 'wb') as f:
+        pickle.dump(save_H, f)
+
 if __name__ == '__main__':
     init_seed(seed=777)
     parser = argparse.ArgumentParser()
@@ -75,8 +95,8 @@ if __name__ == '__main__':
     parser.add_argument("--remove_self_loops", action='store_true', help="remove_self_loops")
     parser.add_argument("--save_metapath", action='store_true', default=True,
                         help='Save metapath graph structure')
-    parser.add_argument("--save_dir", type=str, default='metapath_data/original',
-                        help='Directory to save metapath graph')
+    parser.add_argument("--save_dir", type=str, default='metapath_data/H',
+                        help='Directory to save metapath H')
 
     args = parser.parse_args()
     print(args)
@@ -132,7 +152,8 @@ if __name__ == '__main__':
     loss = nn.CrossEntropyLoss()
     
     best_val_f1 = 0
-    best_Ws = None
+    best_H = None
+    all_H = []  # 存储所有epoch的H
     
     for i in range(epochs):
         model.zero_grad()
@@ -162,14 +183,33 @@ if __name__ == '__main__':
                   'val_f1: {:.4f}'.format(val_f1),
                   'test_f1: {:.4f}'.format(test_f1))
             
+            # 获取当前epoch的H
+            current_H = []
+            for layer in model.layers:
+                if layer.first:
+                    H, _ = layer(A, num_nodes)
+                else:
+                    H, _ = layer(A, num_nodes, H)
+                H = model.normalization(H, num_nodes)
+                current_H = H  # 保存最后一层的H
+            all_H.append(current_H)  # 保存当前epoch的H
+            
             if sk_val_f1 > best_val_f1:
                 best_val_f1 = sk_val_f1
-                best_Ws = Ws
+                best_H = current_H  # 保存最佳epoch的H
                 
                 # 保存metapath图结构
                 if args.save_metapath:
-                    save_metapath_graph(A, best_Ws, num_nodes, 
+                    save_metapath_graph(A, Ws, num_nodes, 
                                       os.path.join(args.save_dir, args.dataset))
                     print(f'Metapath graph structure saved to {os.path.join(args.save_dir, args.dataset)}')
+
+    # 保存所有epoch的H
+    save_metapath_H(all_H, os.path.join(args.save_dir, 'total_metapath.pkl'))
+    print(f'All epochs metapath H saved to {os.path.join(args.save_dir, "total_metapath.pkl")}')
+    
+    # 保存最佳epoch的H
+    save_metapath_H([best_H], os.path.join(args.save_dir, 'total_metapath_best.pkl'))
+    print(f'Best epoch metapath H saved to {os.path.join(args.save_dir, "total_metapath_best.pkl")}')
 
     print('Best val f1:', best_val_f1) 

@@ -11,60 +11,20 @@ from sklearn.metrics import f1_score as sk_f1_score
 from utils import init_seed, _norm, f1_score
 import copy
 import scipy.sparse as sp
+import pandas as pd
 
-def save_metapath_graph(A, Ws, num_nodes, save_dir):
-    """保存metapath图结构"""
-    # 构建新的邻接矩阵
-    new_edges = []
-    for W_list in Ws:  # Ws是一个列表，每个元素W_list也是一个列表
-        for W in W_list:  # 遍历每个W_list中的权重矩阵
-            # 将权重矩阵转换为numpy数组
-            w_np = W.detach().cpu().numpy()
-            # 对每个通道构建新的边
-            for i in range(w_np.shape[0]):
-                for j in range(w_np.shape[1]):
-                    if w_np[i,j] > 0.1:  # 只保留权重较大的边
-                        # 获取原始边
-                        edge_i, value_i = A[i]
-                        edge_j, value_j = A[j]
-                        # 构建新的边
-                        edge_i = edge_i.cpu().numpy()
-                        edge_j = edge_j.cpu().numpy()
-                        value_i = value_i.cpu().numpy()
-                        value_j = value_j.cpu().numpy()
-                        
-                        # 构建稀疏矩阵
-                        adj_i = sp.coo_matrix((value_i, (edge_i[0], edge_i[1])), shape=(num_nodes, num_nodes))
-                        adj_j = sp.coo_matrix((value_j, (edge_j[0], edge_j[1])), shape=(num_nodes, num_nodes))
-                        
-                        # 矩阵乘法得到新的边
-                        new_adj = adj_i.dot(adj_j)
-                        new_edges.append(new_adj)
-    
-    # 保存新的边
-    os.makedirs(save_dir, exist_ok=True)
-    with open(os.path.join(save_dir, 'metapath_edges.pkl'), 'wb') as f:
-        pickle.dump(new_edges, f)
-    
-    # 保存权重矩阵
-    with open(os.path.join(save_dir, 'metapath_weights.pkl'), 'wb') as f:
-        pickle.dump([[w.detach().cpu().numpy() for w in W_list] for W_list in Ws], f)
-
-def save_metapath_H(H_list, save_path):
-    """保存metapath H到文件"""
+def save_metapath_H(H, save_path):
+    """保存单个epoch的metapath H到文件"""
     # 确保目录存在
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     
     # 将H转换为可保存的格式
     save_H = []
-    for H in H_list:  # 遍历每个epoch的H
-        epoch_H = []
-        for h in H:  # 遍历每个channel的H
-            # 将edge_index和edge_value转换为CPU并转为numpy
-            edge_index = h[0].detach().cpu().numpy()
-            edge_value = h[1].detach().cpu().numpy()
-            epoch_H.append((edge_index, edge_value))
-        save_H.append(epoch_H)
+    for h in H:  # 遍历每个channel的H
+        # 将edge_index和edge_value转换为CPU并转为numpy
+        edge_index = h[0].detach().cpu().numpy()
+        edge_value = h[1].detach().cpu().numpy()
+        save_H.append((edge_index, edge_value))
     
     # 保存到文件
     with open(save_path, 'wb') as f:
@@ -93,8 +53,6 @@ if __name__ == '__main__':
                         help='number of runs')
     parser.add_argument("--channel_agg", type=str, default='concat')
     parser.add_argument("--remove_self_loops", action='store_true', help="remove_self_loops")
-    parser.add_argument("--save_metapath", action='store_true', default=True,
-                        help='Save metapath graph structure')
     parser.add_argument("--save_dir", type=str, default='metapath_data/H',
                         help='Directory to save metapath H')
 
@@ -151,9 +109,14 @@ if __name__ == '__main__':
     model.cuda()
     loss = nn.CrossEntropyLoss()
     
+    # 创建保存目录
+    save_dir = os.path.join(args.save_dir, args.dataset, 'H_Epoch')
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # 创建用于记录训练指标的列表
+    metrics = []
     best_val_f1 = 0
-    best_H = None
-    all_H = []  # 存储所有epoch的H
+    best_epoch = 0
     
     for i in range(epochs):
         model.zero_grad()
@@ -177,6 +140,20 @@ if __name__ == '__main__':
             test_f1 = torch.mean(f1_score(torch.argmax(y_test,dim=1), test_target, num_classes=num_classes)).cpu().numpy()
             sk_test_f1 = sk_f1_score(test_target.detach().cpu(), np.argmax(y_test.detach().cpu(), axis=1), average='micro')
             
+            # 记录当前epoch的指标
+            metrics.append({
+                'epoch': i + 1,
+                'loss': loss_train.item(),
+                'train_f1': train_f1,
+                'val_f1': val_f1,
+                'test_f1': test_f1
+            })
+            
+            # 更新最佳验证集性能
+            if sk_val_f1 > best_val_f1:
+                best_val_f1 = sk_val_f1
+                best_epoch = i + 1
+            
             print('Epoch: {:04d}'.format(i+1),
                   'loss_train: {:.4f}'.format(loss_train.item()),
                   'train_f1: {:.4f}'.format(train_f1),
@@ -192,24 +169,20 @@ if __name__ == '__main__':
                     H, _ = layer(A, num_nodes, H)
                 H = model.normalization(H, num_nodes)
                 current_H = H  # 保存最后一层的H
-            all_H.append(current_H)  # 保存当前epoch的H
             
-            if sk_val_f1 > best_val_f1:
-                best_val_f1 = sk_val_f1
-                best_H = current_H  # 保存最佳epoch的H
-                
-                # 保存metapath图结构
-                if args.save_metapath:
-                    save_metapath_graph(A, Ws, num_nodes, 
-                                      os.path.join(args.save_dir, args.dataset))
-                    print(f'Metapath graph structure saved to {os.path.join(args.save_dir, args.dataset)}')
-
-    # 保存所有epoch的H
-    save_metapath_H(all_H, os.path.join(args.save_dir, 'total_metapath.pkl'))
-    print(f'All epochs metapath H saved to {os.path.join(args.save_dir, "total_metapath.pkl")}')
+            # 保存当前epoch的H
+            save_path = os.path.join(save_dir, f'metapath_H_Epoch{i+1}.pkl')
+            save_metapath_H(current_H, save_path)
+            print(f'Saved metapath H for epoch {i+1} to {save_path}')
+            
+            # 清理内存
+            del current_H
+            torch.cuda.empty_cache()
     
-    # 保存最佳epoch的H
-    save_metapath_H([best_H], os.path.join(args.save_dir, 'total_metapath_best.pkl'))
-    print(f'Best epoch metapath H saved to {os.path.join(args.save_dir, "total_metapath_best.pkl")}')
+    # 保存训练指标到CSV文件
+    metrics_df = pd.DataFrame(metrics)
+    metrics_df.to_csv(os.path.join(args.save_dir, args.dataset, 'exp.csv'), index=False)
+    print(f'Saved training metrics to {os.path.join(args.save_dir, args.dataset, "exp.csv")}')
 
-    print('Best val f1:', best_val_f1) 
+    print('Training completed!')
+    print(f'Best validation F1: {best_val_f1:.4f} at epoch {best_epoch}') 

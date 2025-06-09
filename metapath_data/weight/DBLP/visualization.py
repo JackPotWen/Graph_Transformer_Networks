@@ -89,7 +89,7 @@ def plot_attention_heatmap(weights):
             # 对每一行分别进行softmax
             for row in range(W.shape[0]):
                 row_softmax = F.softmax(torch.from_numpy(W[row]), dim=0).numpy()
-                title = f'W{i+1} Row {row+1}'
+                title = f'W{j+1} Row {row+1}'
                 save_path = os.path.join(save_dir, 'heatmaps', f'heatmap_{plot_count+1}.png')
                 plot_single_heatmap(row_softmax, title, edge_types, save_path)
                 plot_count += 1

@@ -8,6 +8,56 @@ from sklearn.metrics import f1_score as sk_f1_score
 from utils import init_seed, f1_score
 import os
 
+def load_node_features(feature_path):
+    """加载节点特征
+    
+    参数:
+        feature_path (str): 特征文件路径
+        
+    返回:
+        numpy.ndarray: 节点特征矩阵
+    """
+    try:
+        with open(feature_path, 'rb') as f:
+            features = pickle.load(f)
+            if isinstance(features, torch.Tensor):
+                features = features.cpu().numpy()
+            elif isinstance(features, np.ndarray):
+                features = features
+            else:
+                raise ValueError(f"不支持的特征数据类型: {type(features)}")
+        return features
+    except Exception as e:
+        print(f"加载特征文件失败: {str(e)}")
+        raise
+
+def fuse_node_features(feature_paths):
+    """融合多个节点特征
+    
+    参数:
+        feature_paths (list): 特征文件路径列表
+        
+    返回:
+        numpy.ndarray: 融合后的节点特征矩阵
+    """
+    if not feature_paths:
+        raise ValueError("至少需要提供一个特征文件路径")
+    
+    # 加载所有特征
+    features_list = []
+    for path in feature_paths:
+        features = load_node_features(path)
+        features_list.append(features)
+    
+    # 检查所有特征的维度是否一致
+    shapes = [f.shape for f in features_list]
+    if not all(s == shapes[0] for s in shapes):
+        raise ValueError(f"特征维度不一致: {shapes}")
+    
+    # 对特征进行平均融合
+    fused_features = np.mean(features_list, axis=0)
+    return fused_features
+
 if __name__ == '__main__':
     init_seed(seed=777)
     parser = argparse.ArgumentParser()
@@ -32,6 +82,8 @@ if __name__ == '__main__':
     parser.add_argument('--processed_epoch', type=int,
                         help='使用哪个epoch处理后的边权重数据（仅在use_processed_edges为True时有效）')
     parser.add_argument("--remove_self_loops", action='store_true', help="remove_self_loops")
+    parser.add_argument('--additional_features', type=str, nargs='+',
+                        help='额外的节点特征文件路径列表，将与原始特征进行融合')
 
     args = parser.parse_args()
     print(args)
@@ -41,9 +93,19 @@ if __name__ == '__main__':
     data_dir = os.path.join(base_dir, "data", args.dataset)
     processed_data_dir = os.path.join(base_dir, "metapath2vec_including_edge_weight", "process_data", "save_data")
 
-    # 读取原始数据
-    with open(os.path.join(data_dir, 'node_features.pkl'), 'rb') as f:
-        node_features = pickle.load(f)
+    # 准备特征文件路径列表
+    feature_paths = [os.path.join(data_dir, 'node_features.pkl')]
+    if args.additional_features:
+        feature_paths.extend(args.additional_features)
+        print(f"将融合以下特征文件：{feature_paths}")
+        node_features = fuse_node_features(feature_paths)
+        print(f"特征融合完成，维度: {node_features.shape}")
+    else:
+        # 读取原始数据
+        with open(os.path.join(data_dir, 'node_features.pkl'), 'rb') as f:
+            node_features = pickle.load(f)
+
+    # 读取标签数据
     with open(os.path.join(data_dir, 'labels.pkl'), 'rb') as f:
         labels = pickle.load(f)
     

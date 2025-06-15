@@ -25,6 +25,7 @@ class WeightedMetaPath2Vec(torch.nn.Module):
         num_negative_samples (int, optional): 每个正样本的负样本数量 (默认: 1)
         num_nodes_dict (Dict[str, int], optional): 存储每种节点类型节点数量的字典 (默认: None)
         sparse (bool, optional): 如果设置为 True，权重矩阵的梯度将是稀疏的 (默认: False)
+        neg_sample_lambda (float, optional): 负采样中随机采样的比例，范围[0,1] (默认: 0.3)
     """
     def __init__(
         self,
@@ -38,6 +39,7 @@ class WeightedMetaPath2Vec(torch.nn.Module):
         num_negative_samples: int = 1,
         num_nodes_dict: Optional[Dict[NodeType, int]] = None,
         sparse: bool = False,
+        neg_sample_lambda: float = 0.5,
     ):
         super().__init__()
 
@@ -111,6 +113,11 @@ class WeightedMetaPath2Vec(torch.nn.Module):
         self.embedding = Embedding(count + 1, embedding_dim, sparse=sparse)
         self.dummy_idx = count
 
+        # 验证lambda参数
+        if not 0 <= neg_sample_lambda <= 1:
+            raise ValueError("neg_sample_lambda必须在[0,1]范围内")
+        self.neg_sample_lambda = neg_sample_lambda
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -156,14 +163,70 @@ class WeightedMetaPath2Vec(torch.nn.Module):
         return torch.cat(walks, dim=0)
 
     def _neg_sample(self, batch: Tensor) -> Tensor:
-        """生成负样本随机游走"""
+        """生成负样本随机游走，使用混合采样策略
+        
+        混合采样策略：P(v) = λ·random + (1-λ)·inv_weight
+        其中：
+        - λ (neg_sample_lambda) 控制随机采样的比例
+        - inv_weight 是基于边权重的反向采样概率
+        
+        参数:
+            batch (Tensor): 当前批次的节点索引
+            
+        返回:
+            Tensor: 负样本随机游走序列
+        """
         batch = batch.repeat(self.walks_per_node * self.num_negative_samples)
 
         rws = [batch]
         for i in range(self.walk_length):
-            keys = self.metapath[i % len(self.metapath)]
-            batch = torch.randint(0, self.num_nodes_dict[keys[-1]],
-                                (batch.size(0), ), dtype=torch.long)
+            edge_type = self.metapath[i % len(self.metapath)]
+            num_nodes = self.num_nodes_dict[edge_type[-1]]
+            
+            # 获取当前节点的所有可能邻居及其权重
+            start = self.rowptr_dict[edge_type][batch.clamp(0, len(self.rowptr_dict[edge_type])-2)]
+            end = self.rowptr_dict[edge_type][(batch + 1).clamp(0, len(self.rowptr_dict[edge_type])-1)]
+            
+            # 为每个节点生成负样本
+            neg_samples = []
+            for j, (s, e) in enumerate(zip(start, end)):
+                if s < e and s < len(self.col_dict[edge_type]):  # 确保索引有效
+                    # 获取当前节点的所有邻居及其权重
+                    neighbors = self.col_dict[edge_type][s:e]
+                    weights = self.weight_dict[edge_type][s:e]
+                    
+                    if len(neighbors) > 0 and len(weights) > 0:  # 确保有邻居和权重
+                        try:
+                            # 决定是否使用随机采样
+                            if torch.rand(1, device=batch.device) < self.neg_sample_lambda:
+                                # 随机采样
+                                idx = torch.randint(0, len(neighbors), (1,), device=batch.device)
+                            else:
+                                # 基于权重的反向采样
+                                inv_weights = 1.0 / (weights + EPS)  # 避免除零
+                                inv_weights = inv_weights / inv_weights.sum()  # 归一化
+                                
+                                if torch.isfinite(inv_weights).all():  # 确保权重有效
+                                    idx = torch.multinomial(inv_weights, 1, replacement=True)
+                                else:
+                                    # 如果权重无效，使用均匀分布
+                                    idx = torch.randint(0, len(neighbors), (1,), device=batch.device)
+                            
+                            neg_samples.append(neighbors[idx])
+                        except RuntimeError:
+                            # 如果采样失败，使用均匀分布
+                            idx = torch.randint(0, len(neighbors), (1,), device=batch.device)
+                            neg_samples.append(neighbors[idx])
+                    else:
+                        # 如果没有邻居或权重，随机采样一个有效节点
+                        neg_samples.append(torch.randint(0, num_nodes, (1,), device=batch.device))
+                else:
+                    # 如果索引无效，随机采样一个有效节点
+                    neg_samples.append(torch.randint(0, num_nodes, (1,), device=batch.device))
+            
+            batch = torch.cat(neg_samples, dim=0)
+            # 确保batch中的索引不会越界
+            batch = batch.clamp(0, num_nodes - 1)
             rws.append(batch)
 
         rw = torch.stack(rws, dim=-1)

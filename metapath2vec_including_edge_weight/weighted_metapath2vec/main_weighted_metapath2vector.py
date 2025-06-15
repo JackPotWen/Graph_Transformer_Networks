@@ -308,7 +308,7 @@ if __name__ == '__main__':
                         default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/process_data/save_data/Epoch12_edges.pkl',
                         help='带权重的DBLP数据集路径')
     parser.add_argument('--save_dir', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/original_metapath2vec/experiment_result',
+                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/weighted_metapath2vec/experiment_result_with_weighted_negandpos_sample',
                         help='保存结果的目录')
     parser.add_argument('--embedding_dim', type=int, default=128,  # 减小默认嵌入维度
                         help='嵌入维度')
@@ -320,9 +320,9 @@ if __name__ == '__main__':
                         help='每个节点的游走次数')
     parser.add_argument('--num_negative_samples', type=int, default=5,
                         help='负样本数量')
-    parser.add_argument('--epochs', type=int, default=100,
+    parser.add_argument('--epochs', type=int, default=50,
                         help='训练轮数')
-    parser.add_argument('--batch_size', type=int, default=64,  # 减小默认批处理大小
+    parser.add_argument('--batch_size', type=int, default=128,  # 减小默认批处理大小
                         help='批处理大小')
     parser.add_argument('--lr', type=float, default=0.01,
                         help='学习率')

@@ -1,0 +1,192 @@
+import pickle
+import numpy as np
+import torch
+import scipy.sparse as sp
+from scipy.sparse import csr_matrix, csc_matrix
+import os
+from torch_geometric.data import Data
+from torch_geometric.utils import from_scipy_sparse_matrix
+
+def load_dblp_data(data_path="../../data/DBLP"):
+    """
+    加载DBLP异构图数据
+    
+    Args:
+        data_path: 数据文件路径
+        
+    Returns:
+        node_features: 节点特征矩阵
+        edges_list: 边矩阵列表
+        labels: 标签字典，包含train_mask, val_mask, test_mask
+    """
+    print("正在加载DBLP异构图数据...")
+    
+    # 加载节点特征
+    with open(os.path.join(data_path, "node_features.pkl"), 'rb') as f:
+        node_features = pickle.load(f)
+    print(f"节点特征形状: {node_features.shape}")
+    
+    # 加载边数据
+    with open(os.path.join(data_path, "edges.pkl"), 'rb') as f:
+        edges_list = pickle.load(f)
+    print(f"边矩阵数量: {len(edges_list)}")
+    
+    # 加载标签（包含训练、验证、测试分割）
+    with open(os.path.join(data_path, "labels.pkl"), 'rb') as f:
+        labels = pickle.load(f)
+    print(f"标签类型: {type(labels)}")
+    if isinstance(labels, list):
+        print(f"标签长度: {len(labels)}")
+    else:
+        print(f"标签内容: {labels}")
+    
+    return node_features, edges_list, labels
+
+def merge_heterogeneous_edges(edges_list, remove_duplicates=True):
+    """
+    将多个异构图边矩阵进行拼接和去重处理
+    
+    Args:
+        edges_list: 边矩阵列表，每个矩阵代表一种边类型
+        remove_duplicates: 是否去除重复边
+        
+    Returns:
+        merged_adj: 合并后的邻接矩阵
+        edge_types: 边类型信息字典
+    """
+    print("正在合并异构图边矩阵...")
+    
+    if not edges_list:
+        raise ValueError("边矩阵列表为空")
+    
+    # 获取图的节点数量
+    n_nodes = edges_list[0].shape[0]
+    print(f"节点数量: {n_nodes}")
+    
+    # 初始化合并后的邻接矩阵
+    merged_adj = sp.csr_matrix((n_nodes, n_nodes), dtype=np.float32)
+    
+    # 记录每种边类型的统计信息
+    edge_types = {}
+    
+    for i, edge_matrix in enumerate(edges_list):
+        print(f"处理边矩阵 {i+1}: 形状 {edge_matrix.shape}, 非零元素 {edge_matrix.nnz}")
+        
+        # 确保矩阵是CSR格式
+        if not isinstance(edge_matrix, csr_matrix):
+            edge_matrix = edge_matrix.tocsr()
+        
+        # 将当前边矩阵添加到合并矩阵中
+        merged_adj += edge_matrix.astype(np.float32)
+        
+        # 记录边类型信息
+        edge_types[f'type_{i}'] = {
+            'matrix': edge_matrix,
+            'nnz': edge_matrix.nnz,
+            'density': edge_matrix.nnz / (edge_matrix.shape[0] * edge_matrix.shape[1])
+        }
+    
+    print(f"合并后邻接矩阵非零元素: {merged_adj.nnz}")
+    
+    if remove_duplicates:
+        # 去除重复边（将大于1的值设为1）
+        merged_adj.data = np.minimum(merged_adj.data, 1.0)
+        merged_adj.eliminate_zeros()
+        print(f"去重后邻接矩阵非零元素: {merged_adj.nnz}")
+    
+    return merged_adj, edge_types
+
+def parse_label_list(labels, num_nodes):
+    """
+    labels: list of 3 lists, each (N, 2) or (N,2) array, [node_id, label]
+    返回: y, train_mask, val_mask, test_mask
+    """
+    y = torch.full((num_nodes,), -1, dtype=torch.long)
+    train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    val_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    for idx, (split, mask) in enumerate(zip(labels, [train_mask, val_mask, test_mask])):
+        arr = np.array(split)
+        node_ids = arr[:,0].astype(int)
+        node_labels = arr[:,1].astype(int)
+        mask[node_ids] = True
+        y[node_ids] = torch.from_numpy(node_labels)
+    return y, train_mask, val_mask, test_mask
+
+def create_pyg_graph(adj_matrix, node_features, labels):
+    """
+    创建PyG图对象
+    
+    Args:
+        adj_matrix: 邻接矩阵
+        node_features: 节点特征
+        labels: 标签字典，包含train_mask, val_mask, test_mask
+        
+    Returns:
+        data: PyG Data对象
+    """
+    print("正在创建PyG图对象...")
+    
+    # 转换为PyG格式
+    edge_index, edge_weight = from_scipy_sparse_matrix(adj_matrix)
+    
+    # 转换节点特征
+    if isinstance(node_features, np.ndarray):
+        node_features = torch.FloatTensor(node_features)
+    
+    # 创建PyG Data对象
+    num_nodes = node_features.shape[0]
+    # 适配labels为list的情况
+    if isinstance(labels, list) and len(labels) == 3:
+        y, train_mask, val_mask, test_mask = parse_label_list(labels, num_nodes)
+    elif isinstance(labels, dict):
+        y = torch.LongTensor(labels['labels'] if 'labels' in labels else labels['y'])
+        train_mask = torch.BoolTensor(labels['train_mask'])
+        val_mask = torch.BoolTensor(labels['val_mask'])
+        test_mask = torch.BoolTensor(labels['test_mask'])
+    else:
+        y = torch.LongTensor(labels)
+        train_mask = val_mask = test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+    
+    data = Data(
+        x=node_features,
+        edge_index=edge_index,
+        edge_attr=edge_weight.unsqueeze(-1) if edge_weight is not None else torch.ones(edge_index.size(1), 1),
+        y=y,
+        train_mask=train_mask,
+        val_mask=val_mask,
+        test_mask=test_mask
+    )
+    
+    print(f"PyG图创建完成: 节点数 {data.x.size(0)}, 边数 {data.edge_index.size(1)}")
+    print(f"训练节点: {data.train_mask.sum()}, 验证节点: {data.val_mask.sum()}, 测试节点: {data.test_mask.sum()}")
+    
+    return data
+
+def prepare_heterogeneous_data(data_path="../../data/DBLP"):
+    """
+    准备异构图数据的完整流程
+    
+    Args:
+        data_path: 数据文件路径
+        
+    Returns:
+        data: PyG Data对象
+        edge_types: 边类型信息
+    """
+    # 加载原始数据
+    node_features, edges_list, labels = load_dblp_data(data_path)
+    
+    # 合并边矩阵
+    merged_adj, edge_types = merge_heterogeneous_edges(edges_list)
+    
+    # 创建PyG图
+    data = create_pyg_graph(merged_adj, node_features, labels)
+    
+    return data, edge_types
+
+if __name__ == "__main__":
+    # 测试数据加载
+    data, edge_types = prepare_heterogeneous_data()
+    print("数据准备完成！")
+    print(f"图信息: {data}") 

@@ -92,10 +92,19 @@ def train_model(model, data, train_mask, val_mask, test_mask, params, net_params
     
     # 优化器
     optimizer = optim.Adam(model.parameters(), lr=params['init_lr'], weight_decay=params['weight_decay'])
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=params['lr_reduce_factor'],
-        patience=params['lr_schedule_patience'], verbose=True
-    )
+    
+    # 学习率调度器（移除verbose参数以兼容不同PyTorch版本）
+    try:
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=params['lr_reduce_factor'],
+            patience=params['lr_schedule_patience'], verbose=True
+        )
+    except TypeError:
+        # 如果verbose参数不支持，使用默认设置
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=params['lr_reduce_factor'],
+            patience=params['lr_schedule_patience']
+        )
     
     # 记录训练过程
     epoch_train_losses, epoch_val_losses = [], []

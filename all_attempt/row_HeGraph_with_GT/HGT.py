@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torch_geometric.nn import MessagePassing
-from torch_geometric.utils import add_self_loops, degree
+from torch_geometric.utils import add_self_loops, degree, scatter
 
 """
     异构图Transformer层和模型
@@ -59,19 +59,19 @@ class HeterogeneousMultiHeadAttentionLayer(nn.Module):
         # 计算注意力权重
         score = score.squeeze(-1)  # [num_edges, num_heads]
         
-        # 聚合邻居信息
-        out = torch.zeros_like(V)  # [num_nodes, num_heads, out_dim]
+        # 获取当前子图的节点数量
+        num_nodes = x.size(0)
         
-        # 使用scatter_add进行聚合
+        # 用list收集每个head的结果，最后stack，避免原地操作
+        out_list = []
         for h in range(self.num_heads):
             weighted_values = V[row, h] * score[:, h].unsqueeze(-1)  # [num_edges, out_dim]
-            out[:, h] = torch.zeros_like(V[:, h]).scatter_add_(0, col, weighted_values)
-            
-            # 归一化
-            norm = torch.zeros_like(out[:, h]).scatter_add_(0, col, score[:, h])
+            out_h = scatter(weighted_values, col, dim=0, dim_size=num_nodes, reduce='sum')
+            norm = scatter(score[:, h], col, dim=0, dim_size=num_nodes, reduce='sum')
             norm = torch.clamp(norm, min=1e-8)
-            out[:, h] = out[:, h] / norm.unsqueeze(-1)
-        
+            out_h = out_h / norm.unsqueeze(-1)
+            out_list.append(out_h)
+        out = torch.stack(out_list, dim=1)  # [num_nodes, num_heads, out_dim]
         return out
 
 class HeterogeneousGraphTransformerLayer(nn.Module):
@@ -112,6 +112,12 @@ class HeterogeneousGraphTransformerLayer(nn.Module):
         if self.batch_norm:
             self.batch_norm2 = nn.BatchNorm1d(out_dim)
         
+        # 如果输入输出维度不同，添加投影层用于残差连接
+        if in_dim != out_dim and residual:
+            self.residual_proj = nn.Linear(in_dim, out_dim)
+        else:
+            self.residual_proj = None
+        
     def forward(self, x, edge_index, edge_attr=None):
         """前向传播"""
         h_in1 = x # 第一个残差连接
@@ -124,7 +130,10 @@ class HeterogeneousGraphTransformerLayer(nn.Module):
         h = self.O(h)
         
         if self.residual:
-            h = h_in1 + h # 残差连接
+            if self.residual_proj is not None:
+                h = self.residual_proj(h_in1) + h # 残差连接（带投影）
+            else:
+                h = h_in1 + h # 残差连接
         
         if self.layer_norm:
             h = self.layer_norm1(h)
@@ -217,7 +226,7 @@ class HeterogeneousGraphTransformerNet(nn.Module):
         
         self.in_feat_dropout = nn.Dropout(in_feat_dropout)
         
-        # 异构图Transformer层
+        # 异构图Transformer层 - 确保所有层使用相同的隐藏维度
         self.layers = nn.ModuleList([
             HeterogeneousGraphTransformerLayer(
                 hidden_dim, hidden_dim, num_heads, dropout, 
@@ -226,7 +235,7 @@ class HeterogeneousGraphTransformerNet(nn.Module):
             ) for _ in range(n_layers-1)
         ])
         
-        # 最后一层
+        # 最后一层 - 输出维度为out_dim
         self.layers.append(
             HeterogeneousGraphTransformerLayer(
                 hidden_dim, out_dim, num_heads, dropout, 

@@ -7,7 +7,7 @@ import os
 from torch_geometric.data import Data
 from torch_geometric.utils import from_scipy_sparse_matrix
 
-def load_dblp_data(data_path="../../data/DBLP"):
+def load_dblp_data(data_path="F:/github/Graph_Transformer_Networks/data/DBLP"):
     """
     加载DBLP异构图数据
     
@@ -163,7 +163,7 @@ def create_pyg_graph(adj_matrix, node_features, labels):
     
     return data
 
-def prepare_heterogeneous_data(data_path="../../data/DBLP"):
+def prepare_heterogeneous_data(data_path="F:/github/Graph_Transformer_Networks/data/DBLP"):
     """
     准备异构图数据的完整流程
     

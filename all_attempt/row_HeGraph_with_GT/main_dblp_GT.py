@@ -73,7 +73,7 @@ def main():
     parser = argparse.ArgumentParser(description='异构图Transformer训练')
     parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID')
     parser.add_argument('--use_gpu', action='store_true', help='是否使用GPU')
-    parser.add_argument('--data_path', type=str, default='../../data/DBLP', help='数据路径')
+    parser.add_argument('--data_path', type=str, default='F:/github/Graph_Transformer_Networks/data/DBLP', help='数据路径')
     parser.add_argument('--out_dir', type=str, default='./results', help='输出目录')
     parser.add_argument('--epochs', type=int, default=200, help='训练轮数')
     parser.add_argument('--hidden_dim', type=int, default=128, help='隐藏层维度')

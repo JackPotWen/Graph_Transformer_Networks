@@ -74,7 +74,7 @@ def main():
     parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID')
     parser.add_argument('--use_gpu', action='store_true', help='是否使用GPU')
     parser.add_argument('--data_path', type=str, default='F:/github/Graph_Transformer_Networks/data/DBLP', help='数据路径')
-    parser.add_argument('--out_dir', type=str, default='./results', help='输出目录')
+    parser.add_argument('--out_dir', type=str, default='F:/github/Graph_Transformer_Networks/all_attempt/row_HeGraph_with_GT/results', help='输出目录')
     parser.add_argument('--epochs', type=int, default=200, help='训练轮数')
     parser.add_argument('--hidden_dim', type=int, default=128, help='隐藏层维度')
     parser.add_argument('--n_heads', type=int, default=8, help='注意力头数')
@@ -140,7 +140,7 @@ def main():
     # 保存结果
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     save_dir = os.path.join(args.out_dir, f'experiment_{timestamp}')
-    save_results(results, model, params, net_params, save_dir)
+    save_results(results, model, params, net_params, save_dir, results['results_df'])
     
     print("\n训练完成！")
     print(f"结果保存在: {save_dir}")

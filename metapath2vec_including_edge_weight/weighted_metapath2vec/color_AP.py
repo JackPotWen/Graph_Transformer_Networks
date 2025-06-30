@@ -111,25 +111,25 @@ def visualize_embeddings(author_embeddings, paper_embeddings, save_path=None, n_
 def main():
     # 设置命令行参数
     parser = argparse.ArgumentParser(description='使用PCA对作者和论文节点嵌入进行可视化')
-    parser.add_argument('--input', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/original_metapath2vec/experiment_result/vec_feature.pkl',
-                        help='输入嵌入文件路径')
-    parser.add_argument('--output', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/original_metapath2vec/experiment_result/author_paper_visualization_weighted_m2v.png',
+    parser.add_argument('--vec_feature_path', type=str, 
+                        default='/home/kuei-jan/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/weighted_metapath2vec/experiment_result_with_weighted_sample/vec_feature_w200_l50_d128_c5_ns5.pkl',
+                        help='节点嵌入文件路径')
+    parser.add_argument('--save_path', type=str, 
+                        default='./metapath2vec_including_edge_weight/weighted_metapath2vec/experiment_result_with_weighted_sample/author_paper_visualization_weighted_m2v_w200_l50_d128_c5_ns5.png',
                         help='输出图片保存路径')
     
     args = parser.parse_args()
     
     # 确保保存目录存在
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
     
     # 加载嵌入
     print("加载节点嵌入...")
-    author_embeddings, paper_embeddings = load_embeddings(args.input)
+    author_embeddings, paper_embeddings = load_embeddings(args.vec_feature_path)
     
     # 可视化
     print("生成可视化...")
-    visualize_embeddings(author_embeddings, paper_embeddings, args.output)
+    visualize_embeddings(author_embeddings, paper_embeddings, args.save_path)
 
 if __name__ == '__main__':
     main() 

@@ -5,9 +5,9 @@ from model_gtn import GTN
 from model_fastgtn import FastGTNs
 import pickle
 import argparse
-from torch_geometric.utils import f1_score, add_self_loops
+from torch_geometric.utils import add_self_loops
 from sklearn.metrics import f1_score as sk_f1_score
-from utils import init_seed, _norm
+from utils import init_seed, _norm, f1_score
 import copy
 
 if __name__ == '__main__':
@@ -53,14 +53,14 @@ if __name__ == '__main__':
     weight_decay = args.weight_decay
     num_layers = args.num_layers
 
-    with open('../data/%s/node_features.pkl' % args.dataset,'rb') as f:
+    with open('./data/%s/node_features.pkl' % args.dataset,'rb') as f:
         node_features = pickle.load(f)
-    with open('../data/%s/edges.pkl' % args.dataset,'rb') as f:
+    with open('./data/%s/edges.pkl' % args.dataset,'rb') as f:
         edges = pickle.load(f)
-    with open('../data/%s/labels.pkl' % args.dataset,'rb') as f:
+    with open('./data/%s/labels.pkl' % args.dataset,'rb') as f:
         labels = pickle.load(f)
     if args.dataset == 'PPI':
-        with open('../data/%s/ppi_tvt_nids.pkl' % args.dataset, 'rb') as fp:
+        with open('./data/%s/ppi_tvt_nids.pkl' % args.dataset, 'rb') as fp:
             nids = pickle.load(fp)
 
     num_nodes = edges[0].shape[0]
@@ -79,7 +79,6 @@ if __name__ == '__main__':
     edge_tmp = torch.stack((torch.arange(0,num_nodes),torch.arange(0,num_nodes))).type(torch.cuda.LongTensor)
     value_tmp = torch.ones(num_nodes).type(torch.cuda.FloatTensor)
     A.append((edge_tmp,value_tmp))
-    
     
     num_edge_type = len(A)
     node_features = torch.from_numpy(node_features).type(torch.cuda.FloatTensor)
@@ -167,8 +166,7 @@ if __name__ == '__main__':
                 sk_train_f1 = sk_f1_score(train_target.detach().cpu(), np.argmax(y_train.detach().cpu(), axis=1), average='micro')
             # print(W)
             # print('Train - Loss: {}, Macro_F1: {}, Micro_F1: {}'.format(loss.detach().cpu().numpy(), train_f1, sk_train_f1))
-            
-            loss.backward()
+            loss.backward() 
             optimizer.step()
             model.eval()
             # Valid

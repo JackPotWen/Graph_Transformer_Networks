@@ -162,11 +162,11 @@ def visualize_embeddings(embeddings, save_path=None, n_components=2):
 def main():
     # 设置命令行参数
     parser = argparse.ArgumentParser(description='使用PCA进行节点嵌入可视化')
-    parser.add_argument('--input', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/original_metapath2vec/experiment_result/vec_feature.pkl',
-                        help='输入嵌入文件路径')
-    parser.add_argument('--output', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/original_metapath2vec/experiment_result/node_embeddings_visualization_weighted_m2v.png',
+    parser.add_argument('--vec_feature_path', type=str, 
+                        default='./metapath2vec_including_edge_weight/original_metapath2vec/experiment_result/vec_feature.pkl',
+                        help='节点嵌入文件路径')
+    parser.add_argument('--save_path', type=str, 
+                        default='./metapath2vec_including_edge_weight/original_metapath2vec/experiment_result/node_embeddings_visualization_weighted_m2v.png',
                         help='输出图片保存路径')
     parser.add_argument('--n_components', type=int, default=2, choices=[2, 3],
                         help='PCA降维后的维度 (2或3)')
@@ -174,15 +174,15 @@ def main():
     args = parser.parse_args()
     
     # 确保保存目录存在
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
     
     # 加载嵌入
     print("加载节点嵌入...")
-    embeddings = load_embeddings(args.input)
+    embeddings = load_embeddings(args.vec_feature_path)
     
     # 可视化
     print(f"生成{args.n_components}D可视化...")
-    visualize_embeddings(embeddings, args.output, args.n_components)
+    visualize_embeddings(embeddings, args.save_path, args.n_components)
 
 if __name__ == '__main__':
     main() 

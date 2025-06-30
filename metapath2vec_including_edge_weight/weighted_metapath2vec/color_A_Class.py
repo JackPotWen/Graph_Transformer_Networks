@@ -200,35 +200,35 @@ def visualize_authors_only(embeddings, labels, save_path=None):
 def main():
     # 设置命令行参数
     parser = argparse.ArgumentParser(description='使用PCA对带标签的作者节点进行可视化')
-    parser.add_argument('--input', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/original_metapath2vec/experiment_result/vec_feature.pkl',
-                        help='输入嵌入文件路径')
-    parser.add_argument('--label_path', type=str,
-                        default='F:/github/Graph_Transformer_Networks/data/DBLP/labels.pkl',
+    parser.add_argument('--vec_feature_path', type=str, 
+                        default='./metapath2vec_including_edge_weight/original_metapath2vec/experiment_result/vec_feature.pkl',
+                        help='节点嵌入文件路径')
+    parser.add_argument('--label_path', type=str, 
+                        default='./data/DBLP/labels.pkl',
                         help='标签文件路径')
-    parser.add_argument('--output_dir', type=str,
-                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/original_metapath2vec/experiment_result',
+    parser.add_argument('--save_dir', type=str, 
+                        default='./metapath2vec_including_edge_weight/original_metapath2vec/experiment_result',
                         help='输出目录路径')
     
     args = parser.parse_args()
     
     # 确保输出目录存在
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.save_dir, exist_ok=True)
     
     # 加载数据
     print("加载节点嵌入...")
-    embeddings = load_embeddings(args.input)
+    embeddings = load_embeddings(args.vec_feature_path)
     
     print("加载标签数据...")
     labels = load_labels(args.label_path)
     
     # 生成两个可视化图
     print("生成作者-论文节点可视化...")
-    all_nodes_path = os.path.join(args.output_dir, 'author_paper_class_visualization.png')
+    all_nodes_path = os.path.join(args.save_dir, 'author_paper_class_visualization.png')
     visualize_all_nodes(embeddings, labels, all_nodes_path)
     
     print("生成作者节点聚类可视化...")
-    authors_only_path = os.path.join(args.output_dir, 'author_class_visualization.png')
+    authors_only_path = os.path.join(args.save_dir, 'author_class_visualization.png')
     visualize_authors_only(embeddings, labels, authors_only_path)
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@ import pickle
 import numpy as np
 import scipy.sparse as sp
 import os
+import argparse
 
 def analyze_sparse_matrix(matrix, matrix_name):
     """分析稀疏矩阵的详细信息"""
@@ -66,13 +67,28 @@ def analyze_sparse_matrix(matrix, matrix_name):
                 print(f"位置 ({row}, {col}): {value}")
 
 def main():
+    # 设置命令行参数
+    parser = argparse.ArgumentParser(description='查看数据集边信息')
+    parser.add_argument('--dataset', type=str, default='DBLP', 
+                        choices=['DBLP', 'IMDB', 'ACM'],
+                        help='选择要查看的数据集 (DBLP, IMDB, ACM)')
+    args = parser.parse_args()
+    
     # 获取当前文件的绝对路径
     current_dir = os.path.dirname(os.path.abspath(__file__))
     # 获取项目根目录
     root_dir = os.path.abspath(os.path.join(current_dir, "../../../"))
     # 设置数据路径
-    data_dir = os.path.join(root_dir, "data", "DBLP")
+    data_dir = os.path.join(root_dir, "data", args.dataset)
     edges_file = os.path.join(data_dir, "edges.pkl")
+    
+    print(f"数据集: {args.dataset}")
+    print(f"边文件路径: {edges_file}")
+    
+    # 检查文件是否存在
+    if not os.path.exists(edges_file):
+        print(f"错误: 边文件 {edges_file} 不存在!")
+        return
     
     try:
         with open(edges_file, 'rb') as f:

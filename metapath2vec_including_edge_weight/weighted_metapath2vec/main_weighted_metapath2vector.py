@@ -281,13 +281,16 @@ def train_weighted_metapath2vec(args):
         conf_emb = model('conference').cpu()
         node_emb = torch.cat([author_emb, paper_emb, conf_emb], dim=0)
         
-        save_path = os.path.join(args.save_dir, 'vec_feature.pkl')
+        # 构建包含超参数信息的文件名
+        filename = f'vec_feature_w{args.walks_per_node}_l{args.walk_length}_d{args.embedding_dim}_c{args.context_size}_ns{args.num_negative_samples}.pkl'
+        save_path = os.path.join(args.save_dir, filename)
         with open(save_path, 'wb') as f:
             pickle.dump(node_emb.numpy(), f)
         print(f'节点嵌入已保存到: {save_path}')
     
-    # 保存训练统计信息
-    stats_path = os.path.join(args.save_dir, 'training_stats.json')
+    # 保存训练统计信息，同样包含超参数信息
+    stats_filename = f'training_stats_w{args.walks_per_node}_l{args.walk_length}_d{args.embedding_dim}_c{args.context_size}_ns{args.num_negative_samples}.json'
+    stats_path = os.path.join(args.save_dir, stats_filename)
     with open(stats_path, 'w') as f:
         json.dump(training_stats, f, indent=4)
     print(f'\n训练统计信息已保存到: {stats_path}')
@@ -305,31 +308,31 @@ def train_weighted_metapath2vec(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/process_data/save_data/Epoch12_edges.pkl',
+                        default='./metapath2vec_including_edge_weight/process_data/save_data/Epoch12_edges.pkl',
                         help='带权重的DBLP数据集路径')
     parser.add_argument('--save_dir', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/weighted_metapath2vec/experiment_result_with_weighted_negandpos_sample',
+                        default='./metapath2vec_including_edge_weight/weighted_metapath2vec/experiment_result_with_weighted_sample',
                         help='保存结果的目录')
     parser.add_argument('--embedding_dim', type=int, default=128,  # 减小默认嵌入维度
                         help='嵌入维度')
-    parser.add_argument('--walk_length', type=int, default=80,
+    parser.add_argument('--walk_length', type=int, default=50,
                         help='随机游走长度')
     parser.add_argument('--context_size', type=int, default=5,
                         help='上下文窗口大小')
-    parser.add_argument('--walks_per_node', type=int, default=10,
+    parser.add_argument('--walks_per_node', type=int, default=200,
                         help='每个节点的游走次数')
     parser.add_argument('--num_negative_samples', type=int, default=5,
                         help='负样本数量')
     parser.add_argument('--epochs', type=int, default=50,
                         help='训练轮数')
-    parser.add_argument('--batch_size', type=int, default=128,  # 减小默认批处理大小
+    parser.add_argument('--batch_size', type=int, default=64,  # 减小默认批处理大小
                         help='批处理大小')
     parser.add_argument('--lr', type=float, default=0.01,
                         help='学习率')
     parser.add_argument('--log_steps', type=int, default=1,
                         help='打印日志的步数')
     parser.add_argument('--label_path', type=str, 
-                        default='data/DBLP/labels.pkl',
+                        default='./data/DBLP/labels.pkl',
                         help='标签数据路径')
     
     args = parser.parse_args()

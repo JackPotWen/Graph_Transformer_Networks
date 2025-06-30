@@ -3,13 +3,23 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from torch import Tensor
 from torch.nn import Embedding
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-from torch_geometric.index import index2ptr
 from torch_geometric.typing import EdgeType, NodeType, OptTensor
 from torch_geometric.utils import sort_edge_index
 
 EPS = 1e-15
+
+class NodeDataset(Dataset):
+    """节点数据集，用于DataLoader"""
+    def __init__(self, num_nodes: int):
+        self.num_nodes = num_nodes
+    
+    def __len__(self):
+        return self.num_nodes
+    
+    def __getitem__(self, idx):
+        return idx
 
 class MetaPath2Vec(torch.nn.Module):
     """MetaPath2Vec 模型实现，基于论文 "metapath2vec: Scalable Representation Learning for Heterogeneous Networks"
@@ -51,15 +61,36 @@ class MetaPath2Vec(torch.nn.Module):
                 N = int(edge_index[1].max() + 1)
                 num_nodes_dict[key] = max(N, num_nodes_dict.get(key, N))
 
-        # 预处理边索引
-        self.rowptr_dict, self.col_dict, self.rowcount_dict = {}, {}, {}
+        # 预处理边索引，使用邻接表而不是指针
+        self.adj_dict = {}  # 邻接表字典
         for keys, edge_index in edge_index_dict.items():
             sizes = (num_nodes_dict[keys[0]], num_nodes_dict[keys[-1]])
             row, col = sort_edge_index(edge_index, num_nodes=max(sizes)).cpu()
-            rowptr = index2ptr(row, size=sizes[0])
-            self.rowptr_dict[keys] = rowptr
-            self.col_dict[keys] = col
-            self.rowcount_dict[keys] = rowptr[1:] - rowptr[:-1]
+            
+            # 构建邻接表
+            adj_list = [[] for _ in range(sizes[0])]
+            
+            # 填充邻接表
+            for i in range(row.size(0)):
+                src_node = int(row[i])
+                dst_node = int(col[i])
+                
+                if src_node < sizes[0]:  # 确保索引在有效范围内
+                    adj_list[src_node].append(dst_node)
+            
+            # 转换为张量
+            max_neighbors = max(len(neighbors) for neighbors in adj_list) if adj_list else 0
+            if max_neighbors == 0:
+                max_neighbors = 1
+            
+            # 填充邻接表，使用-1表示无效邻居
+            adj_tensor = torch.full((sizes[0], max_neighbors), -1, dtype=torch.long)
+            
+            for i, neighbors in enumerate(adj_list):
+                if neighbors:
+                    adj_tensor[i, :len(neighbors)] = torch.tensor(neighbors, dtype=torch.long)
+            
+            self.adj_dict[keys] = adj_tensor
 
         # 验证元路径的有效性
         for edge_type1, edge_type2 in zip(metapath[:-1], metapath[1:]):
@@ -127,8 +158,8 @@ class MetaPath2Vec(torch.nn.Module):
         参数:
             **kwargs: DataLoader 的参数，如 batch_size, shuffle 等
         """
-        return DataLoader(range(self.num_nodes_dict[self.metapath[0][0]]),
-                         collate_fn=self._sample, **kwargs)
+        dataset = NodeDataset(self.num_nodes_dict[self.metapath[0][0]])
+        return DataLoader(dataset, collate_fn=self._sample, **kwargs)
 
     def _pos_sample(self, batch: Tensor) -> Tensor:
         """生成正样本随机游走"""
@@ -137,10 +168,8 @@ class MetaPath2Vec(torch.nn.Module):
         rws = [batch]
         for i in range(self.walk_length):
             edge_type = self.metapath[i % len(self.metapath)]
-            batch = sample(
-                self.rowptr_dict[edge_type],
-                self.col_dict[edge_type],
-                self.rowcount_dict[edge_type],
+            batch = sample_adj(
+                self.adj_dict[edge_type],
                 batch,
                 num_neighbors=1,
                 dummy_idx=self.dummy_idx,
@@ -177,8 +206,10 @@ class MetaPath2Vec(torch.nn.Module):
             walks.append(rw[:, j:j + self.context_size])
         return torch.cat(walks, dim=0)
 
-    def _sample(self, batch: List[int]) -> Tuple[Tensor, Tensor]:
+    def _sample(self, batch) -> Tuple[Tensor, Tensor]:
         """采样正负样本"""
+        if isinstance(batch, (list, tuple)):
+            batch = batch[0]  # Dataset返回的是单个值
         if not isinstance(batch, Tensor):
             batch = torch.tensor(batch, dtype=torch.long)
         return self._pos_sample(batch), self._neg_sample(batch)
@@ -242,9 +273,56 @@ class MetaPath2Vec(torch.nn.Module):
                 f'{self.embedding.weight.size(1)})')
 
 
+def sample_adj(adj: Tensor, subset: Tensor, num_neighbors: int, dummy_idx: int) -> Tensor:
+    """邻居节点采样（基于邻接表）
+    
+    参数:
+        adj (Tensor): 邻接表，形状为 (num_nodes, max_neighbors)
+        subset (Tensor): 要采样的节点子集
+        num_neighbors (int): 每个节点要采样的邻居数量
+        dummy_idx (int): 虚拟节点索引
+        
+    返回:
+        Tensor: 采样得到的邻居节点
+    """
+    # 处理无效节点
+    mask = subset >= dummy_idx
+    subset = subset.clamp(min=0, max=adj.size(0) - 1)
+    
+    # 获取每个节点的邻居
+    node_neighbors = adj[subset]  # (batch_size, max_neighbors)
+    
+    # 创建有效邻居的掩码（-1表示无效邻居）
+    valid_mask = node_neighbors >= 0
+    
+    # 采样邻居
+    sampled_neighbors = []
+    for i in range(len(subset)):
+        if mask[i]:
+            # 无效节点，返回虚拟节点
+            sampled_neighbors.append(torch.full((num_neighbors,), dummy_idx, 
+                                              device=subset.device))
+        else:
+            # 获取当前节点的有效邻居
+            valid_neighbors = node_neighbors[i][valid_mask[i]]
+            
+            if len(valid_neighbors) > 0:
+                # 随机采样邻居
+                idx = torch.randint(0, len(valid_neighbors), (num_neighbors,))
+                sampled_neighbors.append(valid_neighbors[idx])
+            else:
+                # 没有邻居，返回虚拟节点
+                sampled_neighbors.append(torch.full((num_neighbors,), dummy_idx, 
+                                                  device=subset.device))
+    
+    sampled = torch.stack(sampled_neighbors)
+    return sampled
+
+
+# 保留原始函数作为备用
 def sample(rowptr: Tensor, col: Tensor, rowcount: Tensor, subset: Tensor,
            num_neighbors: int, dummy_idx: int) -> Tensor:
-    """采样邻居节点
+    """采样邻居节点 - 原始版本（基于指针）
     
     参数:
         rowptr (Tensor): 行指针

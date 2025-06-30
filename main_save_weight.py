@@ -153,6 +153,7 @@ if __name__ == '__main__':
                   'test_f1: {:.4f}'.format(test_f1))
     
     # 保存所有epoch的权重矩阵
+    save_dir = os.path.join(args.save_dir, args.dataset)
     save_weights(all_Ws, os.path.join(save_dir, 'all_weights.pkl'))
     print(f'Saved all weights to {os.path.join(save_dir, "all_weights.pkl")}')
     

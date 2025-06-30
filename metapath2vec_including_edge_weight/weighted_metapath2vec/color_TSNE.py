@@ -69,19 +69,19 @@ def visualize_embeddings(embeddings, labels=None, save_path=None, perplexity=30,
     """
     # 定义节点类型和索引范围
     num_authors = 4057  # 0-4056
-    num_papers = 14328  # 4057-18384
-    num_conferences = 20  # 18385-18404
+    num_papers = 14328  # 0-14327
+    num_conferences = 20  # 0-19
     
     print("正在使用t-SNE进行降维...")
     # 使用t-SNE降维到2维
     tsne = TSNE(
         n_components=2,
         perplexity=perplexity,
-        n_iter=n_iter,
-        learning_rate=learning_rate,
         random_state=42,
         verbose=1
     )
+    
+    # 对嵌入进行降维
     embeddings_2d = tsne.fit_transform(embeddings)
     
     print("正在生成可视化...")
@@ -91,15 +91,16 @@ def visualize_embeddings(embeddings, labels=None, save_path=None, perplexity=30,
     if color_by_class and labels is not None:
         # 按类别对作者节点进行染色
         unique_classes = np.unique(labels[:, 1])
-        palette = sns.color_palette('tab10', n_colors=len(unique_classes))
+        colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
         
         # 绘制作者节点（按类别染色）
         for i, class_label in enumerate(unique_classes):
             mask = labels[:, 1] == class_label
             author_indices = labels[mask, 0]
+            color = colors[i % len(colors)]
             plt.scatter(embeddings_2d[author_indices, 0],
                        embeddings_2d[author_indices, 1],
-                       c=[palette[i]],
+                       c=color,
                        label=f'Author (Class {class_label})',
                        alpha=0.6,
                        s=10)
@@ -155,14 +156,14 @@ def visualize_embeddings(embeddings, labels=None, save_path=None, perplexity=30,
 def main():
     # 设置命令行参数
     parser = argparse.ArgumentParser(description='使用t-SNE进行节点嵌入可视化')
-    parser.add_argument('--input', type=str,
-                        default='F:/github/Graph_Transformer_Networks/experiment_result/vec_feature_m2v_woweight.pkl',
-                        help='输入嵌入文件路径')
-    parser.add_argument('--label_path', type=str,
-                        default='F:/github/Graph_Transformer_Networks/data/DBLP/labels.pkl',
+    parser.add_argument('--vec_feature_path', type=str, 
+                        default='/home/kuei-jan/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/weighted_metapath2vec/experiment_result_with_weighted_sample/vec_feature_w200_l50_d128_c5_ns5.pkl',
+                        help='节点嵌入文件路径')
+    parser.add_argument('--label_path', type=str, 
+                        default='./data/DBLP/labels.pkl',
                         help='标签文件路径')
-    parser.add_argument('--output', type=str,
-                        default='F:/github/Graph_Transformer_Networks/experiment_result/node_embeddings_tsne_wo_m2v.png',
+    parser.add_argument('--save_path', type=str, 
+                        default='/home/kuei-jan/github/Graph_Transformer_Networks/metapath2vec_including_edge_weight/weighted_metapath2vec/experiment_result_with_weighted_sample/node_embeddings_tsne_m2v_w200_l50_d128_c5_ns5.png',
                         help='输出图片保存路径')
     parser.add_argument('--perplexity', type=int, default=40,
                         help='t-SNE的困惑度参数')
@@ -189,11 +190,11 @@ def main():
         learning_rate = 'auto'
     
     # 确保保存目录存在
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
     
     # 加载嵌入
     print("加载节点嵌入...")
-    embeddings = load_embeddings(args.input)
+    embeddings = load_embeddings(args.vec_feature_path)
     
     # 如果需要按类别染色，加载标签数据
     labels = None
@@ -205,7 +206,7 @@ def main():
     visualize_embeddings(
         embeddings,
         labels=labels,
-        save_path=args.output,
+        save_path=args.save_path,
         perplexity=args.perplexity,
         n_iter=args.n_iter,
         learning_rate=learning_rate,

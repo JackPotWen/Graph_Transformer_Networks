@@ -92,11 +92,11 @@ def visualize_embeddings(embeddings, save_path=None, n_neighbors=15, min_dist=0.
 def main():
     # 设置命令行参数
     parser = argparse.ArgumentParser(description='使用UMAP进行节点嵌入可视化')
-    parser.add_argument('--input', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/experiment_result/vec_feature.pkl',
-                        help='输入嵌入文件路径')
-    parser.add_argument('--output', type=str, 
-                        default='F:/github/Graph_Transformer_Networks/experiment_result/node_embeddings_umap.png',
+    parser.add_argument('--vec_feature_path', type=str, 
+                        default='./experiment_result/vec_feature.pkl',
+                        help='节点嵌入文件路径')
+    parser.add_argument('--save_path', type=str, 
+                        default='./experiment_result/node_embeddings_umap.png',
                         help='输出图片保存路径')
     parser.add_argument('--n_neighbors', type=int, default=15,
                         help='UMAP的邻居数量参数')
@@ -109,17 +109,17 @@ def main():
     args = parser.parse_args()
     
     # 确保保存目录存在
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
     
     # 加载嵌入
     print("加载节点嵌入...")
-    embeddings = load_embeddings(args.input)
+    embeddings = load_embeddings(args.vec_feature_path)
     
     # 可视化
     print("生成UMAP可视化...")
     visualize_embeddings(
         embeddings, 
-        save_path=args.output,
+        save_path=args.save_path,
         n_neighbors=args.n_neighbors,
         min_dist=args.min_dist,
         metric=args.metric

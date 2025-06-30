@@ -3,13 +3,23 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from torch import Tensor
 from torch.nn import Embedding
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-from torch_geometric.index import index2ptr
 from torch_geometric.typing import EdgeType, NodeType, OptTensor
 from torch_geometric.utils import sort_edge_index
 
 EPS = 1e-15
+
+class NodeDataset(Dataset):
+    """节点数据集，用于DataLoader"""
+    def __init__(self, num_nodes: int):
+        self.num_nodes = num_nodes
+    
+    def __len__(self):
+        return self.num_nodes
+    
+    def __getitem__(self, idx):
+        return idx
 
 class WeightedMetaPath2Vec(torch.nn.Module):
     """带权重的MetaPath2Vec模型实现
@@ -53,22 +63,46 @@ class WeightedMetaPath2Vec(torch.nn.Module):
                 N = int(edge_index[1].max() + 1)
                 num_nodes_dict[key] = max(N, num_nodes_dict.get(key, N))
 
-        # 预处理边索引和权重
-        self.rowptr_dict, self.col_dict, self.rowcount_dict = {}, {}, {}
-        self.weight_dict = {}
+        # 预处理边索引和权重，使用邻接表而不是指针
+        self.adj_dict = {}  # 邻接表字典
+        self.weight_dict = {}  # 权重字典
         for keys, edge_index in edge_index_dict.items():
             sizes = (num_nodes_dict[keys[0]], num_nodes_dict[keys[-1]])
             row, col = sort_edge_index(edge_index, num_nodes=max(sizes)).cpu()
-            rowptr = index2ptr(row, size=sizes[0])
-            self.rowptr_dict[keys] = rowptr
-            self.col_dict[keys] = col
-            self.rowcount_dict[keys] = rowptr[1:] - rowptr[:-1]
             
-            # 处理权重
+            # 构建邻接表
+            adj_list = [[] for _ in range(sizes[0])]
+            weight_list = [[] for _ in range(sizes[0])]
+            
+            # 获取权重
             weights = edge_weight_dict[keys]
-            if weights.dim() == 1:
-                weights = weights[:rowptr.size(0)-1]  # 只取到rowptr的倒数第二个元素
-            self.weight_dict[keys] = weights
+            
+            # 填充邻接表和权重表
+            for i in range(row.size(0)):
+                src_node = int(row[i])
+                dst_node = int(col[i])
+                weight = float(weights[i]) if weights.dim() == 1 else 1.0
+                
+                if src_node < sizes[0]:  # 确保索引在有效范围内
+                    adj_list[src_node].append(dst_node)
+                    weight_list[src_node].append(weight)
+            
+            # 转换为张量
+            max_neighbors = max(len(neighbors) for neighbors in adj_list) if adj_list else 0
+            if max_neighbors == 0:
+                max_neighbors = 1
+            
+            # 填充邻接表，使用-1表示无效邻居
+            adj_tensor = torch.full((sizes[0], max_neighbors), -1, dtype=torch.long)
+            weight_tensor = torch.zeros((sizes[0], max_neighbors), dtype=torch.float)
+            
+            for i, (neighbors, weights_neighbors) in enumerate(zip(adj_list, weight_list)):
+                if neighbors:
+                    adj_tensor[i, :len(neighbors)] = torch.tensor(neighbors, dtype=torch.long)
+                    weight_tensor[i, :len(weights_neighbors)] = torch.tensor(weights_neighbors, dtype=torch.float)
+            
+            self.adj_dict[keys] = adj_tensor
+            self.weight_dict[keys] = weight_tensor
 
         # 验证元路径的有效性
         for edge_type1, edge_type2 in zip(metapath[:-1], metapath[1:]):
@@ -124,8 +158,8 @@ class WeightedMetaPath2Vec(torch.nn.Module):
 
     def loader(self, **kwargs):
         """返回数据加载器，用于创建正负随机游走"""
-        return DataLoader(range(self.num_nodes_dict[self.metapath[0][0]]),
-                         collate_fn=self._sample, **kwargs)
+        dataset = NodeDataset(self.num_nodes_dict[self.metapath[0][0]])
+        return DataLoader(dataset, collate_fn=self._sample, **kwargs)
 
     def _pos_sample(self, batch: Tensor) -> Tensor:
         """生成正样本随机游走，考虑边权重"""
@@ -134,10 +168,8 @@ class WeightedMetaPath2Vec(torch.nn.Module):
         rws = [batch]
         for i in range(self.walk_length):
             edge_type = self.metapath[i % len(self.metapath)]
-            batch = weighted_sample(
-                self.rowptr_dict[edge_type],
-                self.col_dict[edge_type],
-                self.rowcount_dict[edge_type],
+            batch = weighted_sample_adj(
+                self.adj_dict[edge_type],
                 self.weight_dict[edge_type],
                 batch,
                 num_neighbors=1,
@@ -156,14 +188,7 @@ class WeightedMetaPath2Vec(torch.nn.Module):
         return torch.cat(walks, dim=0)
 
     def _neg_sample(self, batch: Tensor) -> Tensor:
-        """生成负样本随机游走
-        
-        参数:
-            batch (Tensor): 当前批次的节点索引
-            
-        返回:
-            Tensor: 负样本随机游走序列
-        """
+        """生成负样本随机游走"""
         batch = batch.repeat(self.walks_per_node * self.num_negative_samples)
 
         rws = [batch]
@@ -227,15 +252,13 @@ class WeightedMetaPath2Vec(torch.nn.Module):
                 f'{self.embedding.weight.size(1)})')
 
 
-def weighted_sample(rowptr: Tensor, col: Tensor, rowcount: Tensor, weights: Tensor,
-                   subset: Tensor, num_neighbors: int, dummy_idx: int) -> Tensor:
-    """考虑边权重的邻居节点采样
+def weighted_sample_adj(adj: Tensor, weights: Tensor, subset: Tensor, 
+                       num_neighbors: int, dummy_idx: int) -> Tensor:
+    """考虑边权重的邻居节点采样（基于邻接表）
     
     参数:
-        rowptr (Tensor): 行指针
-        col (Tensor): 列索引
-        rowcount (Tensor): 每行的邻居数量
-        weights (Tensor): 边权重
+        adj (Tensor): 邻接表，形状为 (num_nodes, max_neighbors)
+        weights (Tensor): 权重表，形状为 (num_nodes, max_neighbors)
         subset (Tensor): 要采样的节点子集
         num_neighbors (int): 每个节点要采样的邻居数量
         dummy_idx (int): 虚拟节点索引
@@ -243,33 +266,41 @@ def weighted_sample(rowptr: Tensor, col: Tensor, rowcount: Tensor, weights: Tens
     返回:
         Tensor: 采样得到的邻居节点
     """
+    # 处理无效节点
     mask = subset >= dummy_idx
-    subset = subset.clamp(min=0, max=rowptr.numel() - 2)
+    subset = subset.clamp(min=0, max=adj.size(0) - 1)
     
-    # 获取每个节点的邻居权重
-    start = rowptr[subset]
-    end = rowptr[subset + 1]
-    count = end - start
+    # 获取每个节点的邻居和权重
+    node_neighbors = adj[subset]  # (batch_size, max_neighbors)
+    node_weights = weights[subset]  # (batch_size, max_neighbors)
     
-    # 计算每个节点的权重分布
-    probs = []
-    for i in range(len(subset)):
-        if count[i] > 0:
-            node_weights = weights[start[i]:end[i]]
-            probs.append(node_weights / node_weights.sum())
-        else:
-            probs.append(torch.tensor([1.0], device=subset.device))
+    # 创建有效邻居的掩码（-1表示无效邻居）
+    valid_mask = node_neighbors >= 0
     
-    # 根据权重分布进行采样
+    # 采样邻居
     sampled_neighbors = []
-    for i, prob in enumerate(probs):
-        if count[i] > 0:
-            idx = torch.multinomial(prob, num_neighbors, replacement=True)
-            sampled_neighbors.append(col[start[i] + idx])
-        else:
+    for i in range(len(subset)):
+        if mask[i]:
+            # 无效节点，返回虚拟节点
             sampled_neighbors.append(torch.full((num_neighbors,), dummy_idx, 
                                               device=subset.device))
+        else:
+            # 获取当前节点的有效邻居和权重
+            valid_neighbors = node_neighbors[i][valid_mask[i]]
+            valid_weights = node_weights[i][valid_mask[i]]
+            
+            if len(valid_neighbors) > 0:
+                # 确保权重都是正数
+                valid_weights = torch.clamp(valid_weights, min=1e-8)
+                # 归一化权重
+                valid_weights = valid_weights / valid_weights.sum()
+                # 根据权重采样
+                idx = torch.multinomial(valid_weights, num_neighbors, replacement=True)
+                sampled_neighbors.append(valid_neighbors[idx])
+            else:
+                # 没有邻居，返回虚拟节点
+                sampled_neighbors.append(torch.full((num_neighbors,), dummy_idx, 
+                                                  device=subset.device))
     
     sampled = torch.stack(sampled_neighbors)
-    sampled[mask] = dummy_idx
-    return sampled 
+    return sampled

@@ -2,6 +2,7 @@ import pickle
 import numpy as np
 import torch
 import os
+import argparse
 
 def print_data_info(data, name):
     print(f"\n{'='*50}")
@@ -37,14 +38,27 @@ def print_data_info(data, name):
         print(f"值: {data}")
 
 def main():
+    # 设置命令行参数
+    parser = argparse.ArgumentParser(description='查看原始数据集信息')
+    parser.add_argument('--dataset', type=str, default='DBLP', 
+                        choices=['DBLP', 'IMDB', 'ACM'],
+                        help='选择要查看的数据集 (DBLP, IMDB, ACM)')
+    args = parser.parse_args()
+    
     # 获取当前文件的绝对路径
     current_dir = os.path.dirname(os.path.abspath(__file__))
     # 获取项目根目录
     root_dir = os.path.abspath(os.path.join(current_dir, "../../../"))
     # 设置数据路径
-    data_dir = os.path.join(root_dir, "data", "DBLP")
+    data_dir = os.path.join(root_dir, "data", args.dataset)
     
+    print(f"数据集: {args.dataset}")
     print(f"数据目录: {data_dir}")
+    
+    # 检查目录是否存在
+    if not os.path.exists(data_dir):
+        print(f"错误: 数据集目录 {data_dir} 不存在!")
+        return
     
     # 要查看的文件列表
     files = ['edges.pkl', 'labels.pkl', 'node_features.pkl']
@@ -52,9 +66,12 @@ def main():
     for file in files:
         file_path = os.path.join(data_dir, file)
         try:
-            with open(file_path, 'rb') as f:
-                data = pickle.load(f)
-            print_data_info(data, file)
+            if os.path.exists(file_path):
+                with open(file_path, 'rb') as f:
+                    data = pickle.load(f)
+                print_data_info(data, file)
+            else:
+                print(f"\n文件 {file} 不存在于 {data_dir} 目录中")
         except Exception as e:
             print(f"\n处理文件 {file} 时出错:")
             print(f"错误信息: {str(e)}")
